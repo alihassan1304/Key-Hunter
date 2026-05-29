@@ -98,7 +98,6 @@ resize();
 async function loadAssets() {
   const entries = [
     ["splash", "./assets/splash-loading.jpeg"],
-    ["hub", "./assets/main-screen-reference.jpeg"],
     ["arena", "./assets/arena.png"]
   ];
   await Promise.all(entries.map(([key, src]) => new Promise((resolve) => {
@@ -285,21 +284,29 @@ function elementScreen() {
 
 function hubScreen() {
   const p = profile();
-  const inv = inventory();
   const levelXp = xpForNextLevel(p.level || 1);
   const xpPct = levelXp === Infinity ? 100 : Math.min(100, Math.round(((p.xp || 0) / levelXp) * 100));
+  const rank = p.current_rank || "E";
+  const rankOrder = ["E", "D", "C", "B", "A", "S"];
   return html`
     <section class="hub">
       <aside class="profile-card">
-        <div class="avatar">${(p.username || "H").slice(0, 1).toUpperCase()}</div>
-        <div>
-          <h2>${p.username}</h2>
-          <p>${p.equipped_title || "Rookie Hunter"}</p>
+        <div class="profile-top">
+          <div class="avatar">${(p.username || "H").slice(0, 1).toUpperCase()}</div>
+          <div>
+            <h2>${p.username}</h2>
+            <p>${p.equipped_title || "Rookie Hunter"}</p>
+          </div>
         </div>
         <div class="rank-panel">
           <span>Current Rank</span>
-          <strong>${p.current_rank || "E"} RANK</strong>
+          <strong>${rank} RANK</strong>
           <p>${rankTheme(p.current_rank).name}</p>
+          <div class="rank-emblem big rank-${rank}"><b>${rank}</b></div>
+          <div class="rank-stars">${rankOrder.map((item) => `<i class="${rankOrder.indexOf(item) <= rankOrder.indexOf(rank) ? "lit" : ""}"></i>`).join("")}</div>
+          <div class="rank-strip">
+            ${rankOrder.map((item) => `<span class="rank-emblem rank-${item} ${item === rank ? "active" : ""}">${item}</span>`).join("")}
+          </div>
         </div>
         <div class="xp-wrap">
           <span>LV. ${p.level || 1}</span>
@@ -307,8 +314,6 @@ function hubScreen() {
           <small>${p.xp || 0} / ${levelXp === Infinity ? "MAX" : levelXp} XP</small>
         </div>
         <button id="dailyCheckin">Daily Check-In</button>
-        <button data-screen="inventory">Inventory</button>
-        <button data-screen="shop">Shop</button>
       </aside>
 
       <main class="hub-main exact-hub">
@@ -318,7 +323,7 @@ function hubScreen() {
           <span>Energy <strong>120/120</strong></span>
           <span>Keyboard <strong>${equippedSkin().name}</strong></span>
         </nav>
-        <section class="center-scene">
+        <section class="center-scene" aria-label="Cyber city center">
           <div class="scene-copy">
             <span class="eyebrow">Current Loadout</span>
             <h1>${equippedSkin().name}</h1>
@@ -336,18 +341,19 @@ function hubScreen() {
         <section class="hub-quick-blocks">
           <button data-screen="inventory">Inventory</button>
           <button data-screen="inventory">Keyboards</button>
+          <button data-screen="inventory">Pets</button>
           <button data-screen="shop">Shop</button>
-          <button data-screen="settings">Settings</button>
         </section>
         <button id="startGame" class="start-btn">START</button>
       </main>
 
       <aside class="side-actions utility-only">
+        <button id="dailyCheckinSide">Daily</button>
+        <button data-screen="shop">Shop</button>
         <button data-screen="leaderboard">Leaderboard</button>
         <button id="claimMission">Missions</button>
         <button>Achievements</button>
         <button data-screen="settings">Settings</button>
-        ${state.user ? `<button id="signOut">Sign Out</button>` : `<button data-screen="authChoice">Login</button>`}
         <div class="notice">${state.notice}</div>
       </aside>
     </section>
@@ -509,6 +515,7 @@ function bindUI() {
   ui.querySelector("#startGame")?.addEventListener("click", startGame);
   ui.querySelector("#settingsForm")?.addEventListener("submit", saveSettings);
   ui.querySelector("#dailyCheckin")?.addEventListener("click", claimDaily);
+  ui.querySelector("#dailyCheckinSide")?.addEventListener("click", claimDaily);
   ui.querySelector("#claimMission")?.addEventListener("click", claimMission);
   ui.querySelector("#refreshLeaderboard")?.addEventListener("click", async () => {
     await loadLeaderboard();
@@ -1100,20 +1107,66 @@ function drawSplash(time) {
 }
 
 function drawHubBackdrop() {
-  const img = state.assets.hub;
-  if (!img) {
-    drawArena(performance.now());
-    return;
-  }
-  const scale = Math.max(innerWidth / img.width, innerHeight / img.height);
-  const w = img.width * scale;
-  const h = img.height * scale;
+  const time = performance.now();
+  const theme = rankTheme(profile().current_rank || "E");
   ctx.fillStyle = "#05070d";
   ctx.fillRect(0, 0, innerWidth, innerHeight);
-  ctx.globalAlpha = 0.82;
-  ctx.drawImage(img, (innerWidth - w) / 2, (innerHeight - h) / 2, w, h);
-  ctx.globalAlpha = 1;
-  ctx.fillStyle = "rgba(2,5,12,0.18)";
+  const sky = ctx.createLinearGradient(0, 0, 0, innerHeight);
+  sky.addColorStop(0, "#030614");
+  sky.addColorStop(0.42, "#0a1730");
+  sky.addColorStop(1, "#05070d");
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, innerWidth, innerHeight);
+
+  ctx.fillStyle = theme.accent + "12";
+  ctx.fillRect(0, 0, innerWidth, innerHeight);
+
+  for (let layer = 0; layer < 3; layer++) {
+    const baseY = innerHeight * (0.34 + layer * 0.12);
+    const buildingW = 46 + layer * 20;
+    for (let x = -80; x < innerWidth + 120; x += buildingW + 12) {
+      const seed = Math.sin(x * 0.017 + layer * 8);
+      const h = innerHeight * (0.22 + layer * 0.08) + seed * 50;
+      const y = baseY - h * 0.5;
+      ctx.fillStyle = layer === 0 ? "rgba(8,14,32,0.58)" : layer === 1 ? "rgba(7,12,28,0.72)" : "rgba(4,8,18,0.9)";
+      ctx.fillRect(x, y, buildingW, h);
+      ctx.strokeStyle = layer === 2 ? theme.accent + "3f" : theme.secondary + "2a";
+      ctx.strokeRect(x, y, buildingW, h);
+      for (let wy = y + 18; wy < y + h - 10; wy += 26) {
+        if (Math.sin(x * 12.9898 + wy * 78.233 + layer * 19.19) < -0.82) continue;
+        ctx.fillStyle = (Math.sin(wy + x + time * 0.0007) > 0.4 ? theme.accent : theme.secondary) + (layer === 2 ? "99" : "55");
+        ctx.fillRect(x + 10, wy, 14, 3);
+        ctx.fillRect(x + buildingW - 24, wy + 7, 12, 3);
+      }
+    }
+  }
+
+  ctx.strokeStyle = "rgba(35, 48, 86, 0.72)";
+  ctx.lineWidth = 2;
+  for (let i = 0; i < 8; i++) {
+    ctx.beginPath();
+    const y = innerHeight * 0.1 + i * 23;
+    ctx.moveTo(innerWidth * 0.28, y);
+    ctx.bezierCurveTo(innerWidth * 0.45, y + 40, innerWidth * 0.62, y - 30, innerWidth * 0.82, y + 18);
+    ctx.stroke();
+  }
+
+  const floor = ctx.createLinearGradient(0, innerHeight * 0.62, 0, innerHeight);
+  floor.addColorStop(0, "rgba(7,13,25,0.15)");
+  floor.addColorStop(1, "rgba(3,5,11,0.95)");
+  ctx.fillStyle = floor;
+  ctx.fillRect(0, innerHeight * 0.58, innerWidth, innerHeight * 0.42);
+  ctx.strokeStyle = theme.accent + "66";
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 18; i++) {
+    const y = innerHeight * 0.62 + i * 28;
+    ctx.beginPath();
+    ctx.moveTo(innerWidth * 0.08, y);
+    ctx.lineTo(innerWidth * 0.92, y + i * 6);
+    ctx.stroke();
+  }
+
+  ctx.fillStyle = "rgba(0,0,0,0.08)";
   ctx.fillRect(0, 0, innerWidth, innerHeight);
 }
 
