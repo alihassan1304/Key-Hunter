@@ -16,11 +16,15 @@ const state = {
   daily: null,
   missions: [],
   usernameDraft: localStorage.getItem("keyHunterUsername") || "",
+  emailDraft: localStorage.getItem("keyHunterEmail") || "",
   selectedMode: "infinity",
   selectedElement: "wind",
   notice: "",
   leaderboard: [],
   lastResult: null,
+  introFadeStartedAt: 0,
+  introFadeDuration: 3400,
+  introNextScreen: "username",
   game: null,
   assets: {}
 };
@@ -90,6 +94,7 @@ function resize() {
   canvas.width = Math.floor(window.innerWidth * dpr);
   canvas.height = Math.floor(window.innerHeight * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  document.documentElement.style.setProperty("--ui-scale", Math.min(1, window.innerWidth / 1280, window.innerHeight / 720).toFixed(3));
 }
 
 window.addEventListener("resize", resize);
@@ -97,6 +102,10 @@ resize();
 
 async function loadAssets() {
   const entries = [
+    ["firstScreen", "./Reference%20images/first%20screen.png"],
+    ["loadingScreen", "./Reference%20images/loading%20screen.jpeg"],
+    ["mainScreen", "./Reference%20images/final%20main%20screen.png"],
+    ["rankEmblems", "./Reference%20images/rank%20(emblem).png"],
     ["splash", "./assets/splash-loading.jpeg"],
     ["arena", "./assets/arena.png"]
   ];
@@ -190,8 +199,8 @@ function renderUI() {
     ui.innerHTML = `<section class="splash-hit" aria-label="Intro splash"></section>`;
     return;
   }
-  if (state.screen === "transition") {
-    ui.innerHTML = `<section class="transition-copy"><h1>PROFILE SYNC</h1><p>Preparing your hunter interface...</p></section>`;
+  if (state.screen === "introFade") {
+    ui.innerHTML = `<section class="splash-hit" aria-label="Intro transition"></section>`;
     return;
   }
   if (state.screen === "battle") {
@@ -218,8 +227,8 @@ function renderUI() {
 
 function usernameScreen() {
   return html`
-    <section class="screen onboarding">
-      <div class="panel compact glass-panel">
+    <section class="screen onboarding identity-screen">
+      <div class="panel compact glass-panel identity-panel">
         <span class="eyebrow">Hunter Registration</span>
         <h2>Choose Your Typist Name</h2>
         <p class="muted">This name appears on your profile, hub, and leaderboard runs.</p>
@@ -235,13 +244,13 @@ function usernameScreen() {
 
 function authChoiceScreen() {
   return html`
-    <section class="screen onboarding">
-      <div class="panel compact glass-panel">
+    <section class="screen onboarding identity-screen">
+      <div class="panel compact glass-panel identity-panel">
         <span class="eyebrow">Welcome, ${profile().username}</span>
-        <h2>Cloud Save Or Guest Run?</h2>
-        <p class="muted">Guest works now. Login saves Words, levels, pets, skins, and ranked scores to Supabase.</p>
+        <h2>Add Login Info</h2>
+        <p class="muted">Enter email and password to save online, or continue as guest.</p>
         <form id="authForm" class="stack auth-form">
-          <input name="email" type="email" placeholder="Email for login/signup" autocomplete="email" />
+          <input name="email" type="email" value="${state.emailDraft}" placeholder="Email for login/signup" autocomplete="email" />
           <input name="password" type="password" placeholder="Password" autocomplete="current-password" minlength="6" />
           <div class="row">
             <button type="button" id="guestContinue">Continue as Guest</button>
@@ -257,29 +266,52 @@ function authChoiceScreen() {
 
 function elementScreen() {
   return html`
-    <section class="screen">
+    <section class="element-stage screen">
       <div class="element-shell">
-        <span class="eyebrow">Element Origin</span>
-        <h2>Choose Your First Power</h2>
-        <div class="element-grid">
+        <header class="element-title">
+          <span>KEY HUNTER RPG V2</span>
+          <h2>Choose Your Element</h2>
+        </header>
+        <div class="portal-row">
           ${Object.entries(GAME.elements).map(([id, element]) => html`
-            <article class="element-card ${state.selectedElement === id ? "selected" : ""}" style="--element:${element.color}">
-              <h3>${element.name}</h3>
-              <div class="element-art ${id}">
-                <span></span><span></span><span></span>
-              </div>
-              <p>${element.description}</p>
-              <button data-element="${id}">${state.selectedElement === id ? "Selected" : "Select"}</button>
-            </article>
+            <button class="portal ${id} ${state.selectedElement === id ? "selected" : ""}" data-element="${id}" style="--element:${element.color}" aria-label="${element.name}">
+              <span class="portal-icon">${elementSymbol(id)}</span>
+            </button>
           `).join("")}
         </div>
-        <div class="row center">
-          <button id="confirmElement">Confirm Element</button>
+        <div class="element-grid">
+          ${Object.entries(GAME.elements).map(([id, element]) => html`
+            <article class="element-card ${id} ${state.selectedElement === id ? "selected" : ""}" style="--element:${element.color}">
+              <div class="element-token">${elementSymbol(id)}</div>
+              <div>
+                <h3>${element.name}</h3>
+                <p>${elementFlavor(id)}</p>
+              </div>
+              ${id === "fire" ? `<small>Recommended for new players</small>` : ""}
+              <button data-element="${id}" data-confirm-element="true">Select</button>
+              <i class="element-swirl"></i>
+              <i class="card-corner top-left"></i>
+              <i class="card-corner bottom-right"></i>
+            </article>
+          `).join("")}
         </div>
         <div class="notice">${state.notice}</div>
       </div>
     </section>
   `;
+}
+
+function elementSymbol(id) {
+  return { wind: "◎", ice: "*", fire: "▲", lightning: "ϟ" }[id] || "◆";
+}
+
+function elementFlavor(id) {
+  return {
+    wind: "Swift and elusive. Strike with speed and flow like the storm.",
+    ice: "Cold and precise. Control the field and freeze foes in their tracks.",
+    fire: "Fierce and relentless. Burn through enemies with raw power.",
+    lightning: "Fast and unpredictable. Call down thunder and move at light speed."
+  }[id] || GAME.elements[id].description;
 }
 
 function hubScreen() {
@@ -327,7 +359,7 @@ function hubScreen() {
           <div class="scene-copy">
             <span class="eyebrow">Current Loadout</span>
             <h1>${equippedSkin().name}</h1>
-            <p>${equippedPet().name} active • ${equippedSound().name}</p>
+            <p>${equippedPet().name} active &bull; ${equippedSound().name}</p>
           </div>
         </section>
         <section class="mode-list vertical-modes">
@@ -505,6 +537,10 @@ function bindUI() {
   ui.querySelector("#guestContinue")?.addEventListener("click", continueAfterAuth);
   ui.querySelectorAll("[data-element]").forEach((button) => button.addEventListener("click", () => {
     state.selectedElement = button.dataset.element;
+    if (button.dataset.confirmElement) {
+      confirmElement();
+      return;
+    }
     renderUI();
   }));
   ui.querySelector("#confirmElement")?.addEventListener("click", confirmElement);
@@ -543,7 +579,8 @@ function bindBattleButtons() {
 
 function submitUsername(event) {
   event.preventDefault();
-  const username = new FormData(event.currentTarget).get("username").trim().slice(0, 18);
+  const form = new FormData(event.currentTarget);
+  const username = form.get("username").trim().slice(0, 18);
   if (!username) return;
   state.profile = { ...profile(), username };
   state.usernameDraft = username;
@@ -577,12 +614,20 @@ async function submitAuth(event) {
 }
 
 function continueAfterAuth() {
-  state.screen = "transition";
+  state.screen = "elementSelect";
   renderUI();
-  setTimeout(() => {
-    state.screen = profile().selected_element ? "hub" : "elementSelect";
-    renderUI();
-  }, 2300);
+}
+
+function nextIntroScreen() {
+  return "elementSelect";
+}
+
+function startIntroLoading() {
+  if (state.screen !== "splash") return;
+  state.introNextScreen = "username";
+  state.introFadeStartedAt = performance.now();
+  state.screen = "introFade";
+  renderUI();
 }
 
 async function confirmElement() {
@@ -884,10 +929,7 @@ function updatePet(dt) {
 function handleTyping(event) {
   const g = state.game;
   if (state.screen === "splash") {
-    if (performance.now() >= state.splashReadyAt) {
-      state.screen = "username";
-      renderUI();
-    }
+    startIntroLoading();
     return;
   }
   if (state.screen !== "battle" || !g || g.paused || g.ended) return;
@@ -1082,28 +1124,142 @@ async function finishGame(quit) {
   renderUI();
 }
 
+function drawCoverImage(img, alpha = 1) {
+  if (!img) return false;
+  const scale = Math.max(innerWidth / img.width, innerHeight / img.height);
+  const w = img.width * scale;
+  const h = img.height * scale;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.drawImage(img, (innerWidth - w) / 2, (innerHeight - h) / 2, w, h);
+  ctx.restore();
+  return true;
+}
+
+function drawContainImage(img, alpha = 1) {
+  if (!img) return null;
+  const scale = Math.min(innerWidth / img.width, innerHeight / img.height);
+  const w = img.width * scale;
+  const h = img.height * scale;
+  const x = (innerWidth - w) / 2;
+  const y = (innerHeight - h) / 2;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.drawImage(img, x, y, w, h);
+  ctx.restore();
+  return { x, y, w, h };
+}
+
 function drawSplash(time) {
-  const img = state.assets.splash;
+  const img = state.assets.firstScreen || state.assets.splash;
   ctx.fillStyle = "#020308";
   ctx.fillRect(0, 0, innerWidth, innerHeight);
-  if (img) {
-    const scale = Math.max(innerWidth / img.width, innerHeight / img.height) * (1.04 + Math.sin(time * 0.0008) * 0.012);
-    const w = img.width * scale;
-    const h = img.height * scale;
-    ctx.globalAlpha = 0.72;
-    ctx.drawImage(img, (innerWidth - w) / 2, (innerHeight - h) / 2, w, h);
-    ctx.globalAlpha = 1;
-  }
-  ctx.fillStyle = "rgba(0,0,0,0.35)";
+  const fitted = drawContainImage(img) || { y: 0, h: innerHeight };
+  drawSplashMotion(time, fitted, img);
+  ctx.fillStyle = "rgba(0,0,0,0.08)";
   ctx.fillRect(0, 0, innerWidth, innerHeight);
   for (let y = 0; y < innerHeight; y += 6) {
-    ctx.fillStyle = "rgba(255,255,255,0.025)";
+    ctx.fillStyle = "rgba(255,255,255,0.018)";
     ctx.fillRect(0, y, innerWidth, 1);
   }
   ctx.textAlign = "center";
-  ctx.fillStyle = `rgba(233,251,255,${performance.now() >= state.splashReadyAt ? 0.58 + Math.sin(time * 0.006) * 0.18 : 0.2})`;
-  ctx.font = "600 18px system-ui";
-  ctx.fillText("Press any key or click to continue", innerWidth / 2, innerHeight * 0.58);
+  const readyAlpha = 0.38 + Math.sin(time * 0.004) * 0.07;
+  ctx.fillStyle = `rgba(235,250,255,${readyAlpha})`;
+  ctx.shadowColor = "rgba(4,8,20,0.75)";
+  ctx.shadowBlur = 10;
+  ctx.font = "800 22px system-ui";
+  const promptY = Math.min(innerHeight - 24, fitted.y + fitted.h * 0.93);
+  ctx.fillText("TYPE TO START", innerWidth / 2, promptY);
+  ctx.shadowBlur = 0;
+}
+
+function drawSplashMotion(time, area, img) {
+  const t = time * 0.001;
+  const x = area.x || 0;
+  const y = area.y || 0;
+  const w = area.w || innerWidth;
+  const h = area.h || innerHeight;
+
+  drawRotatingSigil(x + w * 0.18, y + h * 0.34, w * 0.11, t * 0.22, "rgba(134,238,255,0.34)");
+  drawRotatingSigil(x + w * 0.55, y + h * 0.13, w * 0.085, -t * 0.18, "rgba(255,118,220,0.26)");
+  drawRotatingSigil(x + w * 0.82, y + h * 0.34, w * 0.09, t * 0.16, "rgba(188,109,255,0.28)");
+
+  if (img) drawImageKeysFromOriginal(img, area, t);
+
+  for (let i = 0; i < 24; i++) {
+    const phase = i * 12.989;
+    const px = x + ((Math.sin(phase) * 0.5 + 0.5) * w);
+    const fall = ((t * (18 + (i % 5) * 5) + i * 37) % (h + 80)) - 40;
+    const sway = Math.sin(t * 1.4 + phase) * 18;
+    ctx.save();
+    ctx.translate(px + sway, y + fall);
+    ctx.rotate(Math.sin(t + phase) * 0.8);
+    ctx.globalAlpha = 0.16 + (i % 4) * 0.03;
+    ctx.fillStyle = i % 3 === 0 ? "#ffb5ef" : "#eaf8ff";
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 8, 3, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+function drawImageKeysFromOriginal(img, area, t) {
+  const sourceKeys = [
+    { sx: 5, sy: 652, sw: 86, sh: 88, phase: 0 },
+    { sx: 105, sy: 590, sw: 86, sh: 86, phase: 0.9 },
+    { sx: 280, sy: 520, sw: 94, sh: 86, phase: 1.8 },
+    { sx: 1030, sy: 510, sw: 92, sh: 86, phase: 0.5 },
+    { sx: 1190, sy: 584, sw: 100, sh: 88, phase: 1.3 },
+    { sx: 1324, sy: 574, sw: 94, sh: 86, phase: 2.2 },
+    { sx: 1438, sy: 566, sw: 98, sh: 90, phase: 2.8 }
+  ];
+  const scale = area.w / img.width;
+  sourceKeys.forEach((key) => {
+    const bob = Math.sin(t * 1.8 + key.phase) * 7 * scale;
+    const drift = Math.cos(t * 1.1 + key.phase) * 3 * scale;
+    const dx = area.x + key.sx * scale + drift;
+    const dy = area.y + key.sy * scale + bob;
+    const dw = key.sw * scale;
+    const dh = key.sh * scale;
+    ctx.save();
+    ctx.globalAlpha = 0.98;
+    ctx.shadowColor = "rgba(255,88,220,0.45)";
+    ctx.shadowBlur = 10 * scale;
+    ctx.drawImage(img, key.sx, key.sy, key.sw, key.sh, dx, dy, dw, dh);
+    ctx.restore();
+  });
+}
+
+function drawRotatingSigil(x, y, radius, rotation, color) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(rotation);
+  ctx.strokeStyle = color;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 16;
+  ctx.lineWidth = 2;
+  for (let i = 0; i < 3; i++) {
+    ctx.beginPath();
+    ctx.arc(0, 0, radius * (0.72 + i * 0.14), i * 0.8, Math.PI * 1.55 + i * 0.8);
+    ctx.stroke();
+  }
+  for (let i = 0; i < 12; i++) {
+    const a = (Math.PI * 2 * i) / 12;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(a) * radius * 0.88, Math.sin(a) * radius * 0.88);
+    ctx.lineTo(Math.cos(a) * radius, Math.sin(a) * radius);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawIntroFade(time) {
+  drawSplash(time);
+  const elapsed = performance.now() - state.introFadeStartedAt;
+  const progress = Math.min(1, elapsed / state.introFadeDuration);
+  const eased = progress * progress * (3 - 2 * progress);
+  ctx.fillStyle = `rgba(0,0,0,${eased})`;
+  ctx.fillRect(0, 0, innerWidth, innerHeight);
 }
 
 function drawHubBackdrop() {
@@ -1111,6 +1267,14 @@ function drawHubBackdrop() {
   const theme = rankTheme(profile().current_rank || "E");
   ctx.fillStyle = "#05070d";
   ctx.fillRect(0, 0, innerWidth, innerHeight);
+  if (drawContainImage(state.assets.mainScreen)) {
+    ctx.fillStyle = "rgba(0,0,0,0.12)";
+    ctx.fillRect(0, 0, innerWidth, innerHeight);
+    ctx.fillStyle = theme.accent + "10";
+    ctx.fillRect(0, 0, innerWidth, innerHeight);
+    return;
+  }
+
   const sky = ctx.createLinearGradient(0, 0, 0, innerHeight);
   sky.addColorStop(0, "#030614");
   sky.addColorStop(0.42, "#0a1730");
@@ -1417,6 +1581,10 @@ function drawMenuBackdrop(time) {
     drawSplash(time);
     return;
   }
+  if (state.screen === "introFade") {
+    drawIntroFade(time);
+    return;
+  }
   if (["hub", "inventory", "shop", "settings", "leaderboard", "results"].includes(state.screen)) {
     drawHubBackdrop();
     return;
@@ -1444,15 +1612,16 @@ function loop(time) {
   } else {
     drawMenuBackdrop(time);
   }
+  if (state.screen === "introFade" && performance.now() - state.introFadeStartedAt >= state.introFadeDuration) {
+    state.screen = state.introNextScreen;
+    renderUI();
+  }
   requestAnimationFrame(loop);
 }
 
 window.addEventListener("keydown", handleTyping);
 window.addEventListener("pointerdown", () => {
-  if (state.screen === "splash" && performance.now() >= state.splashReadyAt) {
-    state.screen = "username";
-    renderUI();
-  }
+  if (state.screen === "splash") startIntroLoading();
 });
 
 boot();
