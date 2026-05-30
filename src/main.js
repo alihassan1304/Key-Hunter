@@ -25,6 +25,11 @@ const state = {
   introFadeStartedAt: 0,
   introFadeDuration: 3400,
   introNextScreen: "username",
+  matrixTransitionStartedAt: 0,
+  matrixTransitionDuration: 850,
+  postIdentityStartedAt: 0,
+  postIdentityDuration: 2600,
+  postIdentityNextScreen: "elementSelect",
   game: null,
   assets: {}
 };
@@ -61,6 +66,31 @@ const localInventory = {
 
 const audio = {
   context: null,
+  music: null,
+  musicStarted: false,
+  setupMusic() {
+    if (this.music) return this.music;
+    this.music = new Audio("./Reference%20images/audio%20track.mp3");
+    this.music.loop = true;
+    this.music.preload = "auto";
+    this.music.volume = Math.min(0.42, Number(state.settings?.sound_volume ?? 0.65) * 0.55);
+    return this.music;
+  },
+  startMusic() {
+    const track = this.setupMusic();
+    this.updateMusicVolume();
+    const playRequest = track.play();
+    if (playRequest?.then) {
+      playRequest.then(() => {
+        this.musicStarted = true;
+      }).catch(() => {});
+    }
+  },
+  updateMusicVolume() {
+    if (!this.music) return;
+    const volume = Number(state.settings?.sound_volume ?? 0.65);
+    this.music.volume = Math.min(0.42, Math.max(0, volume * 0.55));
+  },
   play(packId, power = 1) {
     const volume = Number(state.settings?.sound_volume ?? 0.65);
     if (volume <= 0.01) return;
@@ -118,10 +148,37 @@ async function loadAssets() {
     img.onerror = resolve;
     img.src = src;
   })));
+  state.assets.startupVideo = createLoopingVideo("./Reference%20images/startup%20screen.mp4");
+  startStartupVideo();
+}
+
+function createLoopingVideo(src) {
+  const video = document.createElement("video");
+  video.src = src;
+  video.muted = true;
+  video.loop = false;
+  video.playsInline = true;
+  video.preload = "auto";
+  video.crossOrigin = "anonymous";
+  video.setAttribute("playsinline", "");
+  video.setAttribute("webkit-playsinline", "");
+  video.addEventListener("ended", () => {
+    if (state.screen === "splash") startIntroLoading();
+  });
+  video.load();
+  return video;
+}
+
+function startStartupVideo() {
+  const video = state.assets.startupVideo;
+  if (!video || !video.paused) return;
+  const playRequest = video.play();
+  if (playRequest?.catch) playRequest.catch(() => {});
 }
 
 async function boot() {
   await loadAssets();
+  audio.setupMusic();
   state.profile = localProfile;
   state.inventory = localInventory;
   state.selectedElement = localProfile.selected_element || "wind";
@@ -203,6 +260,10 @@ function renderUI() {
     ui.innerHTML = `<section class="splash-hit" aria-label="Intro transition"></section>`;
     return;
   }
+  if (state.screen === "matrixTransition" || state.screen === "postIdentitySplash") {
+    ui.innerHTML = `<section class="splash-hit" aria-label="Loading next screen"></section>`;
+    return;
+  }
   if (state.screen === "battle") {
     ui.innerHTML = battleHud();
     bindBattleButtons();
@@ -229,12 +290,28 @@ function usernameScreen() {
   return html`
     <section class="screen onboarding identity-screen">
       <div class="panel compact glass-panel identity-panel">
-        <span class="eyebrow">Hunter Registration</span>
-        <h2>Choose Your Typist Name</h2>
-        <p class="muted">This name appears on your profile, hub, and leaderboard runs.</p>
-        <form id="usernameForm" class="stack">
-          <input name="username" value="${state.usernameDraft}" maxlength="18" placeholder="Shadow Typist" autocomplete="nickname" required />
-          <button>Continue</button>
+        <div class="identity-brand">
+          <strong>Key<br>Hunter</strong>
+          <span>Type. Click. Destroy.</span>
+        </div>
+        <form id="identityForm" class="stack identity-form">
+          <label class="field-icon username">
+            <input name="username" value="${state.usernameDraft}" maxlength="18" placeholder="Username" autocomplete="nickname" required />
+          </label>
+          <label class="field-icon email">
+            <input name="email" type="email" value="${state.emailDraft}" placeholder="Email" autocomplete="email" required />
+          </label>
+          <label class="field-icon password">
+            <input name="password" type="password" placeholder="Password" autocomplete="current-password" minlength="6" required />
+          </label>
+          <div class="identity-options">
+            <label><input name="remember" type="checkbox" /> Remember me</label>
+            <button type="button" class="link-button">Forgot Password?</button>
+          </div>
+          <button class="signin-button" value="signin" name="action">Sign In</button>
+          <div class="identity-divider"><span>Or</span></div>
+          <button class="create-button" value="signup" name="action">Create Account</button>
+          <button type="button" id="guestContinue" class="guest-button">Continue As Guest</button>
           <div class="notice">${state.notice}</div>
         </form>
       </div>
@@ -243,25 +320,7 @@ function usernameScreen() {
 }
 
 function authChoiceScreen() {
-  return html`
-    <section class="screen onboarding identity-screen">
-      <div class="panel compact glass-panel identity-panel">
-        <span class="eyebrow">Welcome, ${profile().username}</span>
-        <h2>Add Login Info</h2>
-        <p class="muted">Enter email and password to save online, or continue as guest.</p>
-        <form id="authForm" class="stack auth-form">
-          <input name="email" type="email" value="${state.emailDraft}" placeholder="Email for login/signup" autocomplete="email" />
-          <input name="password" type="password" placeholder="Password" autocomplete="current-password" minlength="6" />
-          <div class="row">
-            <button type="button" id="guestContinue">Continue as Guest</button>
-            <button value="signin" name="action">Login</button>
-            <button value="signup" name="action">Create Account</button>
-          </div>
-          <div class="notice">${state.notice}</div>
-        </form>
-      </div>
-    </section>
-  `;
+  return usernameScreen();
 }
 
 function elementScreen() {
@@ -532,6 +591,7 @@ function bindUI() {
     state.screen = button.dataset.screen;
     renderUI();
   }));
+  ui.querySelector("#identityForm")?.addEventListener("submit", submitIdentity);
   ui.querySelector("#usernameForm")?.addEventListener("submit", submitUsername);
   ui.querySelector("#authForm")?.addEventListener("submit", submitAuth);
   ui.querySelector("#guestContinue")?.addEventListener("click", continueAfterAuth);
@@ -589,6 +649,43 @@ function submitUsername(event) {
   renderUI();
 }
 
+async function submitIdentity(event) {
+  event.preventDefault();
+  const form = new FormData(event.currentTarget);
+  const action = event.submitter?.value || "signin";
+  const username = form.get("username").trim().slice(0, 18);
+  const email = form.get("email").trim();
+  const password = form.get("password");
+  if (!username || !email || !password) {
+    setNotice("Enter username, email, and password.");
+    return;
+  }
+  state.profile = { ...profile(), username };
+  state.usernameDraft = username;
+  state.emailDraft = email;
+  localStorage.setItem("keyHunterUsername", username);
+  localStorage.setItem("keyHunterEmail", email);
+  saveLocal();
+
+  if (!supabase.configured) {
+    continueAfterAuth();
+    return;
+  }
+
+  try {
+    if (action === "signup") await supabase.signUp(email, password, username);
+    else await supabase.signIn(email, password);
+    state.user = await supabase.currentUser();
+    await loadCloudState();
+    if (state.user && username) {
+      state.profile = await supabase.updateProfile(state.user.id, { username });
+    }
+    continueAfterAuth();
+  } catch (error) {
+    setNotice(error.message);
+  }
+}
+
 async function submitAuth(event) {
   event.preventDefault();
   const form = new FormData(event.currentTarget);
@@ -614,7 +711,9 @@ async function submitAuth(event) {
 }
 
 function continueAfterAuth() {
-  state.screen = "elementSelect";
+  state.postIdentityNextScreen = profile().selected_element ? "hub" : "elementSelect";
+  state.matrixTransitionStartedAt = performance.now();
+  state.screen = "matrixTransition";
   renderUI();
 }
 
@@ -624,6 +723,8 @@ function nextIntroScreen() {
 
 function startIntroLoading() {
   if (state.screen !== "splash") return;
+  audio.startMusic();
+  startStartupVideo();
   state.introNextScreen = "username";
   state.introFadeStartedAt = performance.now();
   state.screen = "introFade";
@@ -648,6 +749,7 @@ async function saveSettings(event) {
     reduced_camera_shake: form.get("reduced_camera_shake") === "on"
   };
   state.settings = { ...state.settings, ...patch };
+  audio.updateMusicVolume();
   if (state.user) await supabase.updateSettings(state.user.id, patch);
   localStorage.setItem("keyHunterSettings", JSON.stringify(state.settings));
   setNotice("Settings saved.");
@@ -927,6 +1029,7 @@ function updatePet(dt) {
 }
 
 function handleTyping(event) {
+  audio.startMusic();
   const g = state.game;
   if (state.screen === "splash") {
     startIntroLoading();
@@ -1126,9 +1229,11 @@ async function finishGame(quit) {
 
 function drawCoverImage(img, alpha = 1) {
   if (!img) return false;
-  const scale = Math.max(innerWidth / img.width, innerHeight / img.height);
-  const w = img.width * scale;
-  const h = img.height * scale;
+  const size = mediaSize(img);
+  if (!size) return false;
+  const scale = Math.max(innerWidth / size.width, innerHeight / size.height);
+  const w = size.width * scale;
+  const h = size.height * scale;
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.drawImage(img, (innerWidth - w) / 2, (innerHeight - h) / 2, w, h);
@@ -1138,9 +1243,11 @@ function drawCoverImage(img, alpha = 1) {
 
 function drawContainImage(img, alpha = 1) {
   if (!img) return null;
-  const scale = Math.min(innerWidth / img.width, innerHeight / img.height);
-  const w = img.width * scale;
-  const h = img.height * scale;
+  const size = mediaSize(img);
+  if (!size) return null;
+  const scale = Math.min(innerWidth / size.width, innerHeight / size.height);
+  const w = size.width * scale;
+  const h = size.height * scale;
   const x = (innerWidth - w) / 2;
   const y = (innerHeight - h) / 2;
   ctx.save();
@@ -1150,13 +1257,22 @@ function drawContainImage(img, alpha = 1) {
   return { x, y, w, h };
 }
 
+function mediaSize(media) {
+  const width = media.videoWidth || media.naturalWidth || media.width || 0;
+  const height = media.videoHeight || media.naturalHeight || media.height || 0;
+  return width && height ? { width, height } : null;
+}
+
 function drawSplash(time) {
+  startStartupVideo();
+  const video = state.assets.startupVideo;
   const img = state.assets.firstScreen || state.assets.splash;
   ctx.fillStyle = "#020308";
   ctx.fillRect(0, 0, innerWidth, innerHeight);
-  const fitted = drawContainImage(img) || { y: 0, h: innerHeight };
-  drawSplashMotion(time, fitted, img);
-  ctx.fillStyle = "rgba(0,0,0,0.08)";
+  const videoReady = video && video.readyState >= 2 && mediaSize(video);
+  const fitted = videoReady ? drawContainImage(video) : drawContainImage(img);
+  if (!videoReady) drawSplashMotion(time, fitted || { y: 0, h: innerHeight }, img);
+  ctx.fillStyle = "rgba(0,0,0,0.04)";
   ctx.fillRect(0, 0, innerWidth, innerHeight);
   for (let y = 0; y < innerHeight; y += 6) {
     ctx.fillStyle = "rgba(255,255,255,0.018)";
@@ -1168,7 +1284,8 @@ function drawSplash(time) {
   ctx.shadowColor = "rgba(4,8,20,0.75)";
   ctx.shadowBlur = 10;
   ctx.font = "800 22px system-ui";
-  const promptY = Math.min(innerHeight - 24, fitted.y + fitted.h * 0.93);
+  const promptArea = fitted || { y: 0, h: innerHeight };
+  const promptY = Math.min(innerHeight - 24, promptArea.y + promptArea.h * 0.93);
   ctx.fillText("TYPE TO START", innerWidth / 2, promptY);
   ctx.shadowBlur = 0;
 }
@@ -1260,6 +1377,57 @@ function drawIntroFade(time) {
   const eased = progress * progress * (3 - 2 * progress);
   ctx.fillStyle = `rgba(0,0,0,${eased})`;
   ctx.fillRect(0, 0, innerWidth, innerHeight);
+}
+
+function drawMatrixTransition(time) {
+  const elapsed = performance.now() - state.matrixTransitionStartedAt;
+  const progress = Math.min(1, elapsed / state.matrixTransitionDuration);
+  ctx.fillStyle = `rgba(0, 0, 0, ${0.78 + progress * 0.18})`;
+  ctx.fillRect(0, 0, innerWidth, innerHeight);
+
+  const columns = Math.ceil(innerWidth / 22);
+  ctx.font = "700 18px Consolas, monospace";
+  ctx.textAlign = "left";
+  for (let i = 0; i < columns; i++) {
+    const x = i * 22;
+    const speed = 70 + (i % 8) * 24;
+    const offset = (time * 0.001 * speed + i * 41) % (innerHeight + 180);
+    for (let j = 0; j < 9; j++) {
+      const y = offset - j * 26;
+      if (y < -30 || y > innerHeight + 30) continue;
+      const alpha = Math.max(0, 0.72 - j * 0.085) * (1 - progress * 0.45);
+      ctx.fillStyle = j === 0 ? `rgba(230,255,255,${alpha})` : `rgba(88,255,215,${alpha})`;
+      const glyph = "01アイウエオKEY狩"[Math.floor((i * 7 + j * 3 + time * 0.018) % 12)];
+      ctx.fillText(glyph, x, y);
+    }
+  }
+
+  for (let i = 0; i < 16; i++) {
+    const y = ((time * (0.08 + i * 0.006)) + i * 57) % innerHeight;
+    const h = 2 + (i % 5);
+    ctx.fillStyle = i % 2 ? "rgba(255,79,216,0.32)" : "rgba(110,238,255,0.28)";
+    ctx.fillRect(0, y, innerWidth, h);
+  }
+
+  const flash = Math.sin(progress * Math.PI);
+  ctx.fillStyle = `rgba(255,255,255,${flash * 0.22})`;
+  ctx.fillRect(0, 0, innerWidth, innerHeight);
+}
+
+function drawPostIdentitySplash(time) {
+  ctx.fillStyle = "#020308";
+  ctx.fillRect(0, 0, innerWidth, innerHeight);
+  const fitted = drawContainImage(state.assets.firstScreen || state.assets.mainScreen || state.assets.splash);
+  const elapsed = performance.now() - state.postIdentityStartedAt;
+  const progress = Math.min(1, elapsed / state.postIdentityDuration);
+  const fadeIn = Math.min(1, progress / 0.18);
+  const fadeOut = progress > 0.82 ? 1 - ((progress - 0.82) / 0.18) : 1;
+  ctx.fillStyle = `rgba(0,0,0,${1 - Math.max(0, Math.min(fadeIn, fadeOut))})`;
+  ctx.fillRect(0, 0, innerWidth, innerHeight);
+  ctx.textAlign = "center";
+  ctx.font = "800 15px system-ui";
+  ctx.fillStyle = `rgba(235,250,255,${0.25 + Math.sin(time * 0.006) * 0.08})`;
+  ctx.fillText("INITIALIZING HUNTER PROFILE", innerWidth / 2, Math.min(innerHeight - 26, (fitted?.y || 0) + (fitted?.h || innerHeight) * 0.93));
 }
 
 function drawHubBackdrop() {
@@ -1585,6 +1753,14 @@ function drawMenuBackdrop(time) {
     drawIntroFade(time);
     return;
   }
+  if (state.screen === "matrixTransition") {
+    drawMatrixTransition(time);
+    return;
+  }
+  if (state.screen === "postIdentitySplash") {
+    drawPostIdentitySplash(time);
+    return;
+  }
   if (["hub", "inventory", "shop", "settings", "leaderboard", "results"].includes(state.screen)) {
     drawHubBackdrop();
     return;
@@ -1616,11 +1792,21 @@ function loop(time) {
     state.screen = state.introNextScreen;
     renderUI();
   }
+  if (state.screen === "matrixTransition" && performance.now() - state.matrixTransitionStartedAt >= state.matrixTransitionDuration) {
+    state.postIdentityStartedAt = performance.now();
+    state.screen = "postIdentitySplash";
+    renderUI();
+  }
+  if (state.screen === "postIdentitySplash" && performance.now() - state.postIdentityStartedAt >= state.postIdentityDuration) {
+    state.screen = state.postIdentityNextScreen;
+    renderUI();
+  }
   requestAnimationFrame(loop);
 }
 
 window.addEventListener("keydown", handleTyping);
 window.addEventListener("pointerdown", () => {
+  audio.startMusic();
   if (state.screen === "splash") startIntroLoading();
 });
 
